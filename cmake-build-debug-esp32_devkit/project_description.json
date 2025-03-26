@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "home_managment",
-    "project_version":    "dfdf76e-dirty",
+    "project_version":    "e1d7d16-dirty",
     "project_path":       "C:/Users/yusuf/ClionProjects/home_managment",
     "idf_path":           "C:/Users/yusuf/esp/v5.4/esp-idf",
     "build_dir":          "C:/Users/yusuf/ClionProjects/home_managment/cmake-build-debug-esp32_devkit",
@@ -1210,7 +1210,7 @@
             "managed_reqs": [],
             "managed_priv_reqs": [ "espressif__esp_websocket_client" ],
             "file": "C:/Users/yusuf/ClionProjects/home_managment/cmake-build-debug-esp32_devkit/esp-idf/main/libmain.a",
-            "sources": [ "C:/Users/yusuf/ClionProjects/home_managment/main/main.c", "C:/Users/yusuf/ClionProjects/home_managment/main/message_parser.c" ],
+            "sources": [ "C:/Users/yusuf/ClionProjects/home_managment/main/main.c", "C:/Users/yusuf/ClionProjects/home_managment/main/dht11.c", "C:/Users/yusuf/ClionProjects/home_managment/main/wifi_control/wifi_control.c", "C:/Users/yusuf/ClionProjects/home_managment/main/smart_home/smart_home.c" ],
             "include_dirs": [ "." ]
         },
         "mbedtls": {

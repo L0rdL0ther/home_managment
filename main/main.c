@@ -1,232 +1,138 @@
-#include <esp_err.h>
-#include <esp_event.h>
-#include <esp_http_server.h>
+#include <stdio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <esp_log.h>
-#include <esp_netif.h>
-#include <esp_netif_types.h>
-#include <esp_wifi.h>
-#include <esp_wifi_default.h>
-#include <string.h>
+#include <esp_websocket_client.h>
 #include <driver/gpio.h>
-#include <freertos/event_groups.h>
-#include "nvs_flash.h"
-#include "esp_websocket_client.h"
-#include "message_parser.h"  // Yeni ekledik
+#include "wifi_control/wifi_control.h"
+#include "smart_home/smart_home.h"
+#include "dht11.h"
 
 #define NETWORK_SSID "SUPERONLINE_Wi-Fi_7279"
 #define NETWORK_PASSWORD "PYKydx3PAuTe"
-#define MAXIMUM_RETRY  5
-#define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
-#define TOKEN "auth:IDYoS7QMIAURA1aGos"
+#define AUTH_TOKEN "auth:PIgXssg1dhXIGpcJxiri7Py6J5wYfangki"
 #define WEBSOCKET_URI "ws://192.168.1.5:8080/ws/esp32"
+#define RELAY_GPIO GPIO_NUM_19
 
 static const char *TAG = "home_managment";
-static EventGroupHandle_t s_wifi_event_group;
-static int s_retry_num = 0;
-static esp_netif_t *sta_netif = NULL;
-esp_websocket_client_handle_t client = NULL;
+static void message_callback(int device_id, control_type_t control_type,
+                           const char *value, esp_websocket_client_handle_t client,
+                           void *user_context) {
+    ESP_LOGI(TAG, "Mesaj alındı: ID=%d, Tip=%d, Değer=%s", device_id, control_type, value);
 
-void event_handler(void *arg, esp_event_base_t event_base,
-                   int32_t event_id, void *event_data) {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        ESP_LOGI(TAG, "WiFi başlatıldı, bağlanmaya çalışılıyor...");
-        esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < MAXIMUM_RETRY) {
-            esp_wifi_connect();
-            s_retry_num++;
-            ESP_LOGI(TAG, "Yeniden WiFi'ye bağlanılıyor... Deneme %d/%d",
-                     s_retry_num, MAXIMUM_RETRY);
-        } else {
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-            ESP_LOGI(TAG, "WiFi bağlantısı başarısız oldu");
-        }
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
-        ESP_LOGI(TAG, "IP adresi alındı: " IPSTR, IP2STR(&event->ip_info.ip));
-        s_retry_num = 0;
-        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-    }
-}
+    switch (control_type) {
+        case CONTROL_TYPE_SWITCH:
+                if (device_id == 102) {
+                    // Gelen değeri boolean'a dönüştür
+                    bool relay_state = (strcmp(value, "0") == 0);
 
-void wifi_init_sta(void) {
-    esp_err_t ret = nvs_flash_init();
+                    // GPIO pinini ayarla
+                    gpio_set_level(RELAY_GPIO, relay_state);
 
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-    ESP_LOGI(TAG, "WiFi initialize started.");
-    s_wifi_event_group = xEventGroupCreate();
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    sta_netif = esp_netif_create_default_wifi_sta();
+                    // Durumu logla
+                    ESP_LOGI(TAG, "Röle (GPIO 19) %s", relay_state ? "AÇILDI" : "KAPATILDI");
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-        ESP_EVENT_ANY_ID,
-        &event_handler,
-        NULL,
-        &instance_any_id));
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-        IP_EVENT_STA_GOT_IP,
-        &event_handler,
-        NULL,
-        &instance_got_ip));
-
-    wifi_config_t wifi_config = {
-        .sta = {
-            .threshold.authmode = WIFI_AUTH_WPA2_PSK
-        }
-    };
-    strcpy((char *) wifi_config.sta.ssid, NETWORK_SSID);
-    strcpy((char *) wifi_config.sta.password, NETWORK_PASSWORD);
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "WiFi started.");
-
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-                                           WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                                           pdFALSE, // Bitleri temizleme
-                                           pdFALSE,
-                                           portMAX_DELAY);
-
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "WiFi ağına bağlandı: %s", NETWORK_SSID);
-    } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "WiFi ağına bağlanılamadı: %s", NETWORK_SSID);
-    } else {
-        ESP_LOGE(TAG, "BEKLENMEYEN DURUM");
-    }
-}
-
-static void log_error_if_nonzero(const char *message, int error_code) {
-    if (error_code != 0) {
-        ESP_LOGE(TAG, "Last error %s: 0x%x", message, error_code);
-    }
-}
-
-static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
-    esp_websocket_event_data_t *data = (esp_websocket_event_data_t *) event_data;
-    switch (event_id) {
-        case WEBSOCKET_EVENT_BEGIN:
-            ESP_LOGI(TAG, "WEBSOCKET_EVENT_BEGIN");
-            break;
-        case WEBSOCKET_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "WEBSOCKET_EVENT_CONNECTED");
-
-            if (!esp_websocket_client_is_connected(client))
-                break;
-
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-            if (client != NULL) {
-                // Token'ı binary olarak gönder
-                esp_err_t err = esp_websocket_client_send_bin(client,
-                                                              (const char *) TOKEN,
-                                                              strlen(TOKEN),
-                                                              portMAX_DELAY);
-
-                if (err != ESP_OK) {
-                    ESP_LOGE(TAG, "Token gönderme hatası: %s", esp_err_to_name(err));
+                    // Durumu sunucuya bildir
+                    smart_home_bind_device(device_id, relay_state ? "0" : "1");
                 } else {
-                    ESP_LOGI(TAG, "Binary token gönderildi, doğrulama bekleniyor...");
+                    ESP_LOGW(TAG, "Bilinmeyen cihaz ID: %d", device_id);
                 }
-            }
-
-
-            const char *setValue = "bind:1:1";
-            esp_websocket_client_send_bin(client, setValue, strlen(setValue), portMAX_DELAY);
-
-            break;
-        case WEBSOCKET_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "WEBSOCKET_EVENT_DISCONNECTED");
-            log_error_if_nonzero("HTTP status code", data->error_handle.esp_ws_handshake_status_code);
-            if (data->error_handle.error_type == WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT) {
-                log_error_if_nonzero("reported from esp-tls", data->error_handle.esp_tls_last_esp_err);
-                log_error_if_nonzero("reported from tls stack", data->error_handle.esp_tls_stack_err);
-                log_error_if_nonzero("captured as transport's socket errno",
-                                     data->error_handle.esp_transport_sock_errno);
-            }
-            break;
-        case WEBSOCKET_EVENT_DATA:
-            if (data != NULL && data->data_ptr && data->data_len > 0) {
-                ESP_LOGI(TAG, "Sunucudan mesaj alındı: %.*s", data->data_len, (char *)data->data_ptr);
-
-                // Mesajı parse et - client handle'ı geçir
-                if (parse_websocket_message((char *)data->data_ptr, data->data_len, client)) {
-                    ESP_LOGI(TAG, "Mesaj başarıyla işlendi");
-                } else {
-                    ESP_LOGW(TAG, "Mesaj işlenemedi veya desteklenmeyen format");
-                }
-            }
         break;
-        case WEBSOCKET_EVENT_ERROR:
-            ESP_LOGI(TAG, "WEBSOCKET_EVENT_ERROR");
-            log_error_if_nonzero("HTTP status code", data->error_handle.esp_ws_handshake_status_code);
-            if (data->error_handle.error_type == WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT) {
-                log_error_if_nonzero("reported from esp-tls", data->error_handle.esp_tls_last_esp_err);
-                log_error_if_nonzero("reported from tls stack", data->error_handle.esp_tls_stack_err);
-                log_error_if_nonzero("captured as transport's socket errno",
-                                     data->error_handle.esp_transport_sock_errno);
-            }
-            break;
-        case WEBSOCKET_EVENT_FINISH:
-            ESP_LOGI(TAG, "WEBSOCKET_EVENT_FINISH");
-            break;
-        default: ;
+
+        case CONTROL_TYPE_SLIDER:
+            // Gelecekte slider kontrolü eklenebilir
+                ESP_LOGW(TAG, "Slider kontrol tipi henüz uygulanmadı (Cihaz ID: %d)", device_id);
+        break;
+
+        case CONTROL_TYPE_RGB_PICKER:
+            // Gelecekte RGB kontrolü eklenebilir
+                ESP_LOGW(TAG, "RGB kontrolü henüz uygulanmadı (Cihaz ID: %d)", device_id);
+        break;
+
+        default:
+            ESP_LOGW(TAG, "Desteklenmeyen kontrol tipi: %d (Cihaz ID: %d)", control_type, device_id);
+        break;
     }
 }
 
 void app_main(void) {
     ESP_LOGI(TAG, "Starting... App.");
-
     gpio_config_t io_conf = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << GPIO_NUM_19),
+        .pin_bit_mask = (1ULL << RELAY_GPIO),
         .pull_down_en = 0,
         .pull_up_en = 0
     };
     gpio_config(&io_conf);
 
-    wifi_init_sta();
-    const esp_websocket_client_config_t ws_cfg = {
-        .uri = WEBSOCKET_URI,
+    gpio_num_t dht_gpio = GPIO_NUM_9;
+    ESP_LOGI(TAG, "DHT11 sensörü başlatılıyor (GPIO %d)...", dht_gpio);
+    DHT11_init(dht_gpio);
+
+    wifi_config_params_t wifi_config = {
+        .ssid = NETWORK_SSID,
+        .password = NETWORK_PASSWORD,
+        .max_retry = 5,
+        .auto_reconnect = true,
+        .retry_interval_ms = 5000
     };
-
-    client = esp_websocket_client_init(&ws_cfg);
-    if (client == NULL) {
-        ESP_LOGE(TAG, "WebSocket başlatılamadı!");
+    esp_err_t ret = wifi_control_init(&wifi_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "WiFi başlatılamadı: %s", esp_err_to_name(ret));
         return;
     }
-
-    esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, websocket_event_handler, (void *) client);
-
-    esp_err_t start_ret = esp_websocket_client_start(client);
-    if (start_ret != ESP_OK) {
-        ESP_LOGE(TAG, "WebSocket başlatma hatası: %s", esp_err_to_name(start_ret));
+    smart_home_config_t smart_home_config = {
+        .websocket_uri = WEBSOCKET_URI,
+        .auth_token = AUTH_TOKEN,
+        .auto_reconnect = true,
+        .reconnect_timeout_ms = 10000
+    };
+    ret = smart_home_init(&smart_home_config, message_callback, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Akıllı ev sistemi başlatılamadı: %s", esp_err_to_name(ret));
         return;
     }
-    esp_netif_ip_info_t ip_info;
-    esp_netif_get_ip_info(sta_netif, &ip_info);
-    ESP_LOGI(TAG, "Web sunucu çalışıyor! Web tarayıcınızda şu adrese gidin: http://"IPSTR"/health",
-             IP2STR(&ip_info.ip));
+    smart_home_bind_device(102, "1");
 
+    ESP_LOGI(TAG, "Sistem başarıyla başlatıldı, komutlar bekleniyor...");
 
+    int retry_count = 0;
+    int lastTemperature = 0;
+    int lastHumidity = 0;
 
     while (1) {
+
+        struct dht11_reading dht_data = DHT11_read();
+
+        if (dht_data.status == DHT11_OK) {
+            ESP_LOGI(TAG, "DHT11 Verileri - Nem: %d%%, Sıcaklık: %d°C",
+                     dht_data.humidity, dht_data.temperature);
+            char value_str[8];
+            if (dht_data.humidity != lastHumidity) {
+                sprintf(value_str, "%d", dht_data.humidity);
+                smart_home_bind_device(155, value_str);
+                lastHumidity = dht_data.humidity;
+            }
+            if (dht_data.temperature != lastTemperature) {
+                sprintf(value_str, "%d", dht_data.temperature);
+                smart_home_bind_device(154, value_str);
+                lastTemperature = dht_data.temperature;
+            }
+            retry_count = 0;
+        } else {
+            if (dht_data.status == DHT11_CRC_ERROR) {
+                ESP_LOGW(TAG, "DHT11 CRC hatası!");
+            } else if (dht_data.status == DHT11_TIMEOUT_ERROR) {
+                ESP_LOGW(TAG, "DHT11 zaman aşımı hatası!");
+            }
+            retry_count++;
+            if (retry_count > 5) {
+                ESP_LOGE(TAG, "Sensör bağlantısını kontrol edin!");
+                retry_count = 0;
+            }
+        }
+
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
