@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "home_managment",
-    "project_version":    "e1d7d16-dirty",
+    "project_version":    "273f53a-dirty",
     "project_path":       "C:/Users/yusuf/ClionProjects/home_managment",
     "idf_path":           "C:/Users/yusuf/esp/v5.4/esp-idf",
     "build_dir":          "C:/Users/yusuf/ClionProjects/home_managment/cmake-build-debug-esp32_devkit",
