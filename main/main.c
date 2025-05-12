@@ -8,8 +8,8 @@
 #include "smart_home/smart_home.h"
 #include "dht11.h"
 
-#define NETWORK_SSID "SUPERONLINE_Wi-Fi_7279"
-#define NETWORK_PASSWORD "PYKydx3PAuTe"
+#define NETWORK_SSID "sanne"
+#define NETWORK_PASSWORD "sanne"
 #define AUTH_TOKEN "auth:PIgXssg1dhXIGpcJxiri7Py6J5wYfangki"
 #define WEBSOCKET_URI "ws://192.168.1.5:8080/ws/esp32"
 #define RELAY_GPIO GPIO_NUM_19
@@ -23,16 +23,9 @@ static void message_callback(int device_id, control_type_t control_type,
     switch (control_type) {
         case CONTROL_TYPE_SWITCH:
                 if (device_id == 102) {
-                    // Gelen değeri boolean'a dönüştür
                     bool relay_state = (strcmp(value, "0") == 0);
-
-                    // GPIO pinini ayarla
                     gpio_set_level(RELAY_GPIO, relay_state);
-
-                    // Durumu logla
                     ESP_LOGI(TAG, "Röle (GPIO 19) %s", relay_state ? "AÇILDI" : "KAPATILDI");
-
-                    // Durumu sunucuya bildir
                     smart_home_bind_device(device_id, relay_state ? "0" : "1");
                 } else {
                     ESP_LOGW(TAG, "Bilinmeyen cihaz ID: %d", device_id);
@@ -40,12 +33,10 @@ static void message_callback(int device_id, control_type_t control_type,
         break;
 
         case CONTROL_TYPE_SLIDER:
-            // Gelecekte slider kontrolü eklenebilir
                 ESP_LOGW(TAG, "Slider kontrol tipi henüz uygulanmadı (Cihaz ID: %d)", device_id);
         break;
 
         case CONTROL_TYPE_RGB_PICKER:
-            // Gelecekte RGB kontrolü eklenebilir
                 ESP_LOGW(TAG, "RGB kontrolü henüz uygulanmadı (Cihaz ID: %d)", device_id);
         break;
 

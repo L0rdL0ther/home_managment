@@ -1,6 +1,6 @@
 //
 // Created by yusuf on 26.03.2025.
-//
+// 
 
 #include "smart_home.h"
 #include "control_types.h"
@@ -15,7 +15,7 @@
 
 static const char *TAG = "SMART_HOME";
 
-// WebSocket istemci ve bağlantılı veriler
+// WebSocket client and associated data
 typedef struct {
     esp_websocket_client_handle_t client;
     message_callback_t callback;
@@ -27,7 +27,7 @@ typedef struct {
 
 static smart_home_context_t s_context = {0};
 
-// Kontrol tipini stringe dönüştüren fonksiyon
+// Function to convert control type to string
 static control_type_t string_to_control_type(const char *type_str) {
     static const struct {
         const char *str;
@@ -51,37 +51,37 @@ static control_type_t string_to_control_type(const char *type_str) {
     return CONTROL_TYPE_UNKNOWN;
 }
 
-// Hata kodunu kaydet ve göster
+// Log error code if non-zero
 static void log_error_if_nonzero(const char *message, int error_code) {
     if (error_code != 0) {
-        ESP_LOGE(TAG, "Hata %s: 0x%x", message, error_code);
+        ESP_LOGE(TAG, "Error %s: 0x%x", message, error_code);
     }
 }
 
-// WebSocket mesajlarını ayrıştır
+// Parse WebSocket messages
 static bool parse_websocket_message(const char *message, size_t length) {
     if (message == NULL || length == 0) {
         return false;
     }
 
-    // Başarılı bağlantı mesajını kontrol et
+    // Check for successful connection message
     if (strncmp(message, "Successfully connected", length) == 0) {
-        ESP_LOGI(TAG, "Bağlantı başarıyla doğrulandı!");
+        ESP_LOGI(TAG, "Connection successfully authenticated!");
         s_context.is_authenticated = true;
         return true;
     }
 
-    // "datasend:" prefix kontrolü
+    // Check for "datasend:" prefix
     const char *prefix = "datasend:";
     size_t prefix_len = strlen(prefix);
     if (strncmp(message, prefix, prefix_len) != 0) {
         return false;
     }
 
-    // Mesajı kopyala (strtok_r için güvenli bir kopya)
+    // Create a safe copy of the message (for strtok_r usage)
     char *msg_copy = malloc(length + 1);
     if (!msg_copy) {
-        ESP_LOGE(TAG, "Bellek ayırma hatası");
+        ESP_LOGE(TAG, "Memory allocation error");
         return false;
     }
 
@@ -92,33 +92,33 @@ static bool parse_websocket_message(const char *message, size_t length) {
     char *token;
     char *rest = msg_copy;
 
-    // "datasend:" kısmını geç
+    // Skip "datasend:" part
     token = strtok_r(rest, ":", &rest);
     if (!token || strcmp(token, "datasend") != 0) {
         goto cleanup;
     }
 
-    // Cihaz ID'sini al
+    // Get device ID
     token = strtok_r(NULL, ":", &rest);
     if (!token) {
         goto cleanup;
     }
     int device_id = atoi(token);
 
-    // Kontrol tipini al
+    // Get control type
     token = strtok_r(NULL, ":", &rest);
     if (!token) {
         goto cleanup;
     }
     control_type_t control_type = string_to_control_type(token);
 
-    // Değeri al
+    // Get value
     token = strtok_r(NULL, ":", &rest);
     if (!token) {
         goto cleanup;
     }
 
-    // Callback fonksiyonu çağır
+    // Call callback function
     if (s_context.callback) {
         s_context.callback(device_id, control_type, token, s_context.client, s_context.user_context);
         success = true;
@@ -129,19 +129,19 @@ cleanup:
     return success;
 }
 
-// WebSocket olay işleyicisi
+// WebSocket event handler
 static void websocket_event_handler(void *handler_args, esp_event_base_t base,
                                     int32_t event_id, void *event_data) {
     esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
 
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "WebSocket bağlantısı kuruldu");
+            ESP_LOGI(TAG, "WebSocket connection established");
             s_context.is_connected = true;
 
-            // Token gönderme
+            // Send token
             if (s_context.auth_token && strlen(s_context.auth_token) > 0) {
-                vTaskDelay(pdMS_TO_TICKS(1000)); // Bağlantı istikrarı için kısa bekleme
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Short delay for connection stability
 
                 esp_err_t err = esp_websocket_client_send_bin(
                     s_context.client,
@@ -151,47 +151,47 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
                 );
 
                 if (err != ESP_OK) {
-                    ESP_LOGE(TAG, "Token gönderme hatası: %s", esp_err_to_name(err));
+                    ESP_LOGE(TAG, "Token sending error: %s", esp_err_to_name(err));
                 } else {
-                    ESP_LOGI(TAG, "Kimlik doğrulama token'ı gönderildi, doğrulama bekleniyor...");
+                    ESP_LOGI(TAG, "Authentication token sent, waiting for validation...");
                 }
             }
             break;
 
         case WEBSOCKET_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "WebSocket bağlantısı kesildi");
+            ESP_LOGI(TAG, "WebSocket connection lost");
             s_context.is_connected = false;
             s_context.is_authenticated = false;
 
-            log_error_if_nonzero("HTTP durum kodu", data->error_handle.esp_ws_handshake_status_code);
+            log_error_if_nonzero("HTTP status code", data->error_handle.esp_ws_handshake_status_code);
 
             if (data->error_handle.error_type == WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT) {
-                log_error_if_nonzero("ESP-TLS hatası", data->error_handle.esp_tls_last_esp_err);
-                log_error_if_nonzero("TLS yığın hatası", data->error_handle.esp_tls_stack_err);
-                log_error_if_nonzero("Soket hatası", data->error_handle.esp_transport_sock_errno);
+                log_error_if_nonzero("ESP-TLS error", data->error_handle.esp_tls_last_esp_err);
+                log_error_if_nonzero("TLS stack error", data->error_handle.esp_tls_stack_err);
+                log_error_if_nonzero("Socket error", data->error_handle.esp_transport_sock_errno);
             }
             break;
 
         case WEBSOCKET_EVENT_DATA:
             if (data && data->data_ptr && data->data_len > 0) {
-                ESP_LOGI(TAG, "Sunucudan mesaj alındı: %.*s", data->data_len, (char *)data->data_ptr);
+                ESP_LOGI(TAG, "Message received from server: %.*s", data->data_len, (char *)data->data_ptr);
 
                 if (parse_websocket_message((char *)data->data_ptr, data->data_len)) {
-                    ESP_LOGI(TAG, "Mesaj başarıyla işlendi");
+                    ESP_LOGI(TAG, "Message processed successfully");
                 } else {
-                    ESP_LOGW(TAG, "Mesaj işlenemedi veya desteklenmeyen format");
+                    ESP_LOGW(TAG, "Message could not be processed or unsupported format");
                 }
             }
             break;
 
         case WEBSOCKET_EVENT_ERROR:
-            ESP_LOGE(TAG, "WebSocket hatası");
-            log_error_if_nonzero("HTTP durum kodu", data->error_handle.esp_ws_handshake_status_code);
+            ESP_LOGE(TAG, "WebSocket error");
+            log_error_if_nonzero("HTTP status code", data->error_handle.esp_ws_handshake_status_code);
 
             if (data->error_handle.error_type == WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT) {
-                log_error_if_nonzero("ESP-TLS hatası", data->error_handle.esp_tls_last_esp_err);
-                log_error_if_nonzero("TLS yığın hatası", data->error_handle.esp_tls_stack_err);
-                log_error_if_nonzero("Soket hatası", data->error_handle.esp_transport_sock_errno);
+                log_error_if_nonzero("ESP-TLS error", data->error_handle.esp_tls_last_esp_err);
+                log_error_if_nonzero("TLS stack error", data->error_handle.esp_tls_stack_err);
+                log_error_if_nonzero("Socket error", data->error_handle.esp_transport_sock_errno);
             }
             break;
 
@@ -200,7 +200,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
     }
 }
 
-// Akıllı ev sistemini başlat
+// Initialize the smart home system
 esp_err_t smart_home_init(const smart_home_config_t *config,
                           message_callback_t callback,
                           void *user_context) {
@@ -208,25 +208,25 @@ esp_err_t smart_home_init(const smart_home_config_t *config,
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Önceden başlatılmış mı kontrol et
+    // Check if already initialized
     if (s_context.client) {
-        ESP_LOGW(TAG, "Akıllı ev sistemi zaten başlatılmış");
+        ESP_LOGW(TAG, "Smart home system already initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Konteksti temizle
+    // Clear context
     memset(&s_context, 0, sizeof(s_context));
 
-    // Token kopyası oluştur
+    // Create token copy
     if (config->auth_token && strlen(config->auth_token) > 0) {
         s_context.auth_token = strdup(config->auth_token);
         if (!s_context.auth_token) {
-            ESP_LOGE(TAG, "Token için bellek ayrılamadı");
+            ESP_LOGE(TAG, "Memory allocation failed for token");
             return ESP_ERR_NO_MEM;
         }
     }
 
-    // WebSocket yapılandırması
+    // WebSocket configuration
     esp_websocket_client_config_t ws_cfg = {
         .uri = config->websocket_uri,
         .reconnect_timeout_ms = config->reconnect_timeout_ms > 0 ?
@@ -236,17 +236,17 @@ esp_err_t smart_home_init(const smart_home_config_t *config,
 
     s_context.client = esp_websocket_client_init(&ws_cfg);
     if (!s_context.client) {
-        ESP_LOGE(TAG, "WebSocket istemcisi başlatılamadı");
+        ESP_LOGE(TAG, "WebSocket client initialization failed");
         free(s_context.auth_token);
         s_context.auth_token = NULL;
         return ESP_FAIL;
     }
 
-    // Callback ve kullanıcı bağlamını kaydet
+    // Register callback and user context
     s_context.callback = callback;
     s_context.user_context = user_context;
 
-    // Olay dinleyicilerini kaydet
+    // Register event listeners
     esp_err_t err = esp_websocket_register_events(
         s_context.client,
         WEBSOCKET_EVENT_ANY,
@@ -255,7 +255,7 @@ esp_err_t smart_home_init(const smart_home_config_t *config,
     );
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "WebSocket olayları kaydedilemedi: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to register WebSocket events: %s", esp_err_to_name(err));
         esp_websocket_client_destroy(s_context.client);
         free(s_context.auth_token);
         s_context.client = NULL;
@@ -263,10 +263,10 @@ esp_err_t smart_home_init(const smart_home_config_t *config,
         return err;
     }
 
-    // WebSocket istemcisini başlat
+    // Start WebSocket client
     err = esp_websocket_client_start(s_context.client);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "WebSocket istemcisi başlatılamadı: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to start WebSocket client: %s", esp_err_to_name(err));
         esp_websocket_client_destroy(s_context.client);
         free(s_context.auth_token);
         s_context.client = NULL;
@@ -274,11 +274,11 @@ esp_err_t smart_home_init(const smart_home_config_t *config,
         return err;
     }
 
-    ESP_LOGI(TAG, "Akıllı ev sistemi başlatıldı, WebSocket bağlantısı kuruluyor...");
+    ESP_LOGI(TAG, "Smart home system initialized, WebSocket connection establishing...");
     return ESP_OK;
 }
 
-// Genel mesaj gönderme yardımcı fonksiyonu
+// General helper function to send messages
 static esp_err_t send_message(const char *message) {
     if (!s_context.client || !s_context.is_connected) {
         return ESP_ERR_INVALID_STATE;
@@ -292,26 +292,17 @@ static esp_err_t send_message(const char *message) {
     );
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Mesaj gönderme hatası: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Message sending error: %s", esp_err_to_name(err));
     } else {
-        ESP_LOGI(TAG, "Mesaj gönderildi: %s", message);
+        ESP_LOGI(TAG, "Message sent: %s", message);
     }
 
     return err;
 }
 
-// Durum bildir
-esp_err_t smart_home_send_status(int device_id, const char *value) {
-    if (!value) {
-        return ESP_ERR_INVALID_ARG;
-    }
 
-    char status_message[64];
-    snprintf(status_message, sizeof(status_message), "status:%d:%s", device_id, value);
-    return send_message(status_message);
-}
 
-// Cihazı sunucuya bağla
+// Bind device to server
 esp_err_t smart_home_bind_device(int device_id, const char *bind_value) {
     if (!bind_value) {
         return ESP_ERR_INVALID_ARG;
@@ -322,14 +313,7 @@ esp_err_t smart_home_bind_device(int device_id, const char *bind_value) {
     return send_message(bind_message);
 }
 
-// Sensör verilerini gönder
-esp_err_t smart_home_send_sensor_data(int temperature, int humidity) {
-    char sensor_message[64];
-    snprintf(sensor_message, sizeof(sensor_message), "sensor_data:%d:%d", temperature, humidity);
-    return send_message(sensor_message);
-}
-
-// Akıllı ev sistemini kapat
+// Deinitialize smart home system
 esp_err_t smart_home_deinit(void) {
     if (!s_context.client) {
         return ESP_ERR_INVALID_STATE;
@@ -337,7 +321,7 @@ esp_err_t smart_home_deinit(void) {
 
     esp_err_t err = esp_websocket_client_stop(s_context.client);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "WebSocket istemcisi durdurulamadı: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "WebSocket client stop failed: %s", esp_err_to_name(err));
     }
 
     esp_websocket_client_destroy(s_context.client);
@@ -350,6 +334,6 @@ esp_err_t smart_home_deinit(void) {
     s_context.is_connected = false;
     s_context.is_authenticated = false;
 
-    ESP_LOGI(TAG, "Akıllı ev sistemi kapatıldı");
+    ESP_LOGI(TAG, "Smart home system shut down");
     return ESP_OK;
 }

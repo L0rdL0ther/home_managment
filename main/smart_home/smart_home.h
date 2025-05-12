@@ -5,77 +5,59 @@
 #ifndef SMART_HOME_H
 #define SMART_HOME_H
 
-#include <stdbool.h>           // bool tipi için
-#include <esp_err.h>           // esp_err_t için
-#include <esp_websocket_client.h> // esp_websocket_client_handle_t için
+#include <stdbool.h>           // For bool type
+#include <esp_err.h>           // For esp_err_t type
+#include <esp_websocket_client.h> // For esp_websocket_client_handle_t type
 #include "control_types.h"
 
 /**
- * @brief Akıllı ev sistemi yapılandırma yapısı
+ * @brief Smart Home system configuration structure
  */
 typedef struct {
-    const char *websocket_uri;   // WebSocket sunucu adresi
-    const char *auth_token;      // Kimlik doğrulama token'ı
-    bool auto_reconnect;         // Bağlantı kesildiğinde otomatik yeniden bağlantı
-    int reconnect_timeout_ms;    // Yeniden bağlantı bekleme süresi
+    const char *websocket_uri;   // WebSocket server address
+    const char *auth_token;      // Authentication token
+    bool auto_reconnect;         // Automatic reconnection when the connection is lost
+    int reconnect_timeout_ms;    // Reconnection wait time
 } smart_home_config_t;
 
 /**
- * @brief Sunucudan mesaj alındığında çağrılan callback türü
+ * @brief Callback type called when a message is received from the server
  *
- * @param device_id Cihaz ID'si
- * @param control_type Kontrol tipi
- * @param value Kontrol değeri
- * @param client WebSocket istemci handle
- * @param user_context Kullanıcı tanımlı bağlam verisi
+ * @param device_id Device ID
+ * @param control_type Control type
+ * @param value Control value
+ * @param client WebSocket client handle
+ * @param user_context User-defined context data
  */
 typedef void (*message_callback_t)(int device_id, control_type_t control_type,
                                   const char *value, esp_websocket_client_handle_t client,
                                   void *user_context);
 
 /**
- * @brief Akıllı ev sistemini başlat
+ * @brief Initialize the Smart Home system
  *
- * @param config Yapılandırma ayarları
- * @param callback Mesaj alma callback fonksiyonu
- * @param user_context Kullanıcı tanımlı bağlam verisi
- * @return esp_err_t Başarı durumu
+ * @param config Configuration settings
+ * @param callback Message receiving callback function
+ * @param user_context User-defined context data
+ * @return esp_err_t Success status
  */
 esp_err_t smart_home_init(const smart_home_config_t *config,
                           message_callback_t callback,
                           void *user_context);
 
 /**
- * @brief Sunucuya durumu bildir
+ * @brief Send bind command for a specific device
  *
- * @param device_id Cihaz ID'si
- * @param value Durum değeri
- * @return esp_err_t Başarı durumu
- */
-esp_err_t smart_home_send_status(int device_id, const char *value);
-
-/**
- * @brief Belirli bir cihaz için bind komutunu gönder
- *
- * @param device_id Cihaz ID'si
- * @param bind_value Bağlama değeri
- * @return esp_err_t Başarı durumu
+ * @param device_id Device ID
+ * @param bind_value Binding value
+ * @return esp_err_t Success status
  */
 esp_err_t smart_home_bind_device(int device_id, const char *bind_value);
 
 /**
- * @brief Sensör verilerini sunucuya gönder
+ * @brief Stop and clean up the Smart Home system WebSocket client
  *
- * @param temperature Sıcaklık değeri
- * @param humidity Nem değeri
- * @return esp_err_t Başarı durumu
- */
-esp_err_t smart_home_send_sensor_data(int temperature, int humidity);
-
-/**
- * @brief Akıllı ev sistemi WebSocket istemcisini durdur ve temizle
- *
- * @return esp_err_t Başarı durumu
+ * @return esp_err_t Success status
  */
 esp_err_t smart_home_deinit(void);
 
